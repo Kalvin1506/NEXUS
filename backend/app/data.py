@@ -19,6 +19,20 @@ KnowledgeArticle(kb_id="KB-052",title="DNS Name Resolution Check",category="Netw
 ]
 
 APPS=["NovaHR","Atlas CRM","Orbit ERP","Pulse Inventory","Vertex Finance"]
+# Structured metadata supports transparent conflict and health checks.
+for article in KB:
+    article.procedure_tags=list(article.tags)
+    article.step_order=list(article.resolution_steps)
+    article.negative_feedback=max(1,article.usage-article.success_feedback)
+    article.successful_resolutions=max(1,article.success_feedback//2)
+    article.failed_resolutions=max(0,article.negative_feedback//2)
+next(k for k in KB if k.kb_id=="KB-014").conflicts_with=["KB-007"]
+next(k for k in KB if k.kb_id=="KB-007").conflicts_with=["KB-014"]
+# Deliberately varied examples for the KB-health demonstration.
+next(k for k in KB if k.kb_id=="KB-014").last_updated="2026-09-15"
+next(k for k in KB if k.kb_id=="KB-016").last_updated="2025-06-10"
+poor=next(k for k in KB if k.kb_id=="KB-041")
+poor.last_updated="2024-02-01";poor.negative_feedback=14;poor.successful_resolutions=3;poor.failed_resolutions=11
 now=datetime.now(timezone.utc)
 CASES=[]
 templates=[
@@ -37,9 +51,27 @@ for i in range(20):
 
 def make_tickets():
     rows=[]
-    for i in range(30):
-        case=CASES[i%len(CASES)]; conf=[.93,.84,.71,.42][i%4]
-        rows.append(Ticket(ticket_id=f"TKT-{2041+i}",description=case.description,normalized_description=case.description,application=case.application,error_text="INVALID_TOKEN" if "INVALID_TOKEN" in case.description else "Unknown",symptoms=[case.description],category=case.category,subcategory=case.subcategory,classification_confidence=conf,knowledge_confidence=max(.28,conf-.07),historical_confidence=max(.35,conf-.03),status="Analyzed",resolution_status=["Suggested","Approved","Escalated","No Reliable Match"][i%4],reliable_match=conf>.5,source_references=case.related_kb,created_at=now-timedelta(hours=i*5),updated_at=now-timedelta(hours=i*4)))
+    # Twelve temporally-close NovaHR tickets produce a strong, explainable cluster.
+    for i in range(12):
+        created=now-timedelta(minutes=55-i*4)
+        rows.append(Ticket(ticket_id=f"TKT-{2041+i}",description="NovaHR login failed after password reset with INVALID_TOKEN",normalized_description="NovaHR login failed after password reset with INVALID_TOKEN",application="NovaHR",error_text="INVALID_TOKEN",symptoms=["Unable to authenticate"],technical_terms=["token","password","session"],category="Authentication",subcategory="Token / Session",classification_confidence=.93,knowledge_confidence=.91,historical_confidence=.88,status="Analyzed",resolution_status="Suggested",reliable_match=True,source_references=["KB-014"],created_at=created,updated_at=created))
+        article=next(k for k in KB if k.kb_id=="KB-014");case=CASES[0]
+        rows[-1].kb_matches=[{"kb_id":article.kb_id,"title":article.title,"category":article.category,"score":.91,"matched_terms":["invalid_token","password","token"],"why_matched":"invalid_token, password, token","article":article.model_dump()}]
+        rows[-1].case_matches=[{**case.model_dump(),"similarity":.88}]
+        rows[-1].recommended_resolution=article.resolution_steps[:4]
+        rows[-1].traced_resolution=[{"step":step,"source_kb_id":"KB-014","source_section":f"Resolution Step {n}","evidence_score":.91} for n,step in enumerate(article.resolution_steps[:4],1)]
+    # Five Orbit ERP tickets form a second cluster.
+    for i in range(5):
+        created=now-timedelta(minutes=50-i*8)
+        rows.append(Ticket(ticket_id=f"TKT-{2053+i}",description="Orbit ERP nightly invoice batch failed in scheduler",normalized_description="Orbit ERP nightly invoice batch failed in scheduler",application="Orbit ERP",error_text="Unknown",symptoms=["Batch failure"],technical_terms=["batch","scheduler","invoice"],category="Batch Processing",subcategory="Job Failure",classification_confidence=.9,knowledge_confidence=.84,historical_confidence=.8,status="Analyzed",resolution_status="Suggested",reliable_match=True,source_references=["KB-030"],created_at=created,updated_at=created))
+        article=next(k for k in KB if k.kb_id=="KB-030");case=next(c for c in CASES if c.category=="Batch Processing")
+        rows[-1].kb_matches=[{"kb_id":article.kb_id,"title":article.title,"category":article.category,"score":.84,"matched_terms":["batch","scheduler"],"why_matched":"batch, scheduler","article":article.model_dump()}]
+        rows[-1].case_matches=[{**case.model_dump(),"similarity":.8}]
+        rows[-1].recommended_resolution=article.resolution_steps[:4]
+        rows[-1].traced_resolution=[{"step":step,"source_kb_id":"KB-030","source_section":f"Resolution Step {n}","evidence_score":.84} for n,step in enumerate(article.resolution_steps[:4],1)]
+    for i in range(13):
+        case=CASES[(i+2)%len(CASES)];conf=[.84,.71,.42][i%3];created=now-timedelta(hours=3+i*5)
+        rows.append(Ticket(ticket_id=f"TKT-{2058+i}",description=case.description,normalized_description=case.description,application=case.application,error_text="Unknown",symptoms=[case.description],technical_terms=[],category=case.category,subcategory=case.subcategory,classification_confidence=conf,knowledge_confidence=max(.28,conf-.07),historical_confidence=max(.35,conf-.03),status="Analyzed",resolution_status=["Approved","Escalated","No Reliable Match"][i%3],reliable_match=conf>.5,source_references=case.related_kb,created_at=created,updated_at=created))
     return rows
 
 SERVICES={
@@ -54,3 +86,12 @@ PATTERNS=[
 {"id":"PAT-01","pattern_type":"Recurring Issue","application":"NovaHR","description":"Authentication failures after password resets","evidence":["8 tickets in the last 24 hours","6 involve NovaHR","5 followed deployment DEP-102"],"confidence":.86,"possible_relationship":"Recent authentication deployment DEP-102","related_tickets":["TKT-2041","TKT-2049","TKT-2057"]},
 {"id":"PAT-02","pattern_type":"Knowledge Gap","application":"Pulse Inventory","description":"Inventory event consumer recovery","evidence":["7 similar tickets identified","Average KB confidence: 34%","5 cases used the same technician procedure"],"confidence":.78,"suggested_kb_topic":"Pulse Inventory Event Consumer Recovery","related_tickets":["TKT-2045","TKT-2053"]},
 {"id":"PAT-03","pattern_type":"Increasing Volume","application":"Orbit ERP","description":"Batch scheduler failures increased 40%","evidence":["5 tickets this week","3 occurred after schedule changes"],"confidence":.72,"possible_relationship":"Recent schedule configuration changes","related_tickets":["TKT-2044"]}]
+
+CHANGES=[
+ {"change_id":"CHG-102","title":"Authentication Service Deployment","description":"Routine SSO token-service deployment.","component":"SSO Service","application":"NovaHR","change_type":"Deployment","start_time":now-timedelta(minutes=68),"end_time":now-timedelta(minutes=58),"owner":"Identity Platform","status":"Completed","tags":["authentication","token","sso"]},
+ {"change_id":"CHG-108","title":"Batch Scheduler Configuration","description":"Invoice schedule configuration update.","component":"Batch Scheduler","application":"Orbit ERP","change_type":"Configuration","start_time":now-timedelta(minutes=75),"end_time":now-timedelta(minutes=65),"owner":"ERP Operations","status":"Completed","tags":["batch","scheduler","invoice"]},
+ {"change_id":"CHG-091","title":"Finance Database Maintenance","description":"Planned index maintenance.","component":"Finance Database","application":"Vertex Finance","change_type":"Maintenance","start_time":now-timedelta(days=2),"end_time":now-timedelta(days=2)+timedelta(hours=1),"owner":"Database Operations","status":"Completed","tags":["database","maintenance"]},
+ {"change_id":"CHG-110","title":"CRM Theme Update","description":"User-interface style update.","component":"Atlas CRM","application":"Atlas CRM","change_type":"Deployment","start_time":now-timedelta(hours=7),"end_time":now-timedelta(hours=6,minutes=45),"owner":"CRM Team","status":"Completed","tags":["ui","theme"]},
+ {"change_id":"CHG-112","title":"Inventory Event Bus Patch","description":"Event bus security patch.","component":"Event Bus","application":"Pulse Inventory","change_type":"Patch","start_time":now-timedelta(hours=3),"end_time":now-timedelta(hours=2,minutes=30),"owner":"Platform Team","status":"Completed","tags":["inventory","event","sync"]},
+ {"change_id":"CHG-115","title":"ERP Database Capacity Increase","description":"Planned storage capacity increase.","component":"ERP Database","application":"Orbit ERP","change_type":"Maintenance","start_time":now+timedelta(days=1),"end_time":now+timedelta(days=1,hours=1),"owner":"Database Operations","status":"Scheduled","tags":["database","capacity"]}
+]

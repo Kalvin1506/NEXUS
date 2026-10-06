@@ -74,6 +74,9 @@ def dependency_impact(component:str):
 
 def analyze(payload:dict[str,Any]):
     ext=extract(payload["description"],payload.get("application"),payload.get("error_message")); cls=classify(payload["description"],ext["error_text"])
+    return complete_analysis(payload,ext,cls)
+
+def complete_analysis(payload:dict[str,Any],ext:dict[str,Any],cls:dict[str,Any]):
     query=" ".join([payload["description"],ext["error_text"],*ext["symptoms"]]); kb=search_kb(query,cls["category"]); cases=search_cases(query,ext["application"],cls["category"])
     threshold=float(os.getenv("KB_MATCH_THRESHOLD","0.38"))
     # Category agreement alone is not evidence. Require a shared, distinctive term;
@@ -81,16 +84,18 @@ def analyze(payload:dict[str,Any]):
     generic={"error","application","user","users","failed","failure","service","display","displays"}
     distinctive=[x for x in (kb[0]["matched_terms"] if kb else []) if x not in generic]
     reliable=bool(kb and kb[0]["score"]>=threshold and cls["confidence"]>=.5 and distinctive)
-    resolution=[]; sources=[]
+    resolution=[]; sources=[]; traced=[]
     if reliable:
         # Grounding invariant: every step is copied from retrieved KB evidence only.
         for match in kb:
             if match["score"]>=max(threshold*.8,.3):
                 sources.append(match["kb_id"])
-                for step in match["article"]["resolution_steps"]:
-                    if step not in resolution: resolution.append(step)
+                for step_index,step in enumerate(match["article"]["resolution_steps"],1):
+                    if step not in resolution:
+                        resolution.append(step)
+                        traced.append({"step":step,"source_kb_id":match["kb_id"],"source_section":f"Resolution Step {step_index}","evidence_score":match["score"]})
                 if len(resolution)>=5: break
-        resolution=resolution[:5]
+        resolution=resolution[:5];traced=traced[:5]
     failed=Counter(x for c in cases if c["similarity"]>=.35 for x in c["failed_steps"])
     successful=Counter(x for c in cases if c["similarity"]>=.35 for x in c["successful_steps"])
     hours_open=18; sla=[]
@@ -98,7 +103,7 @@ def analyze(payload:dict[str,Any]):
     if cases and cases[0]["resolution_time"]>60:sla.append("Similar cases historically required extended resolution time")
     if hours_open/24>=.7:sla.append("Ticket is beyond 70% of the response window")
     return {**ext,**cls,"knowledge_matches":kb,"historical_matches":cases,"knowledge_confidence":kb[0]["score"] if kb else 0,"historical_confidence":cases[0]["similarity"] if cases else 0,
-      "reliable_match":reliable,"recommended_resolution":resolution,"source_references":sources,"no_match_message":None if reliable else "The available knowledge base does not contain enough evidence to recommend a reliable resolution.",
+      "reliable_match":reliable,"recommended_resolution":resolution,"traced_resolution":traced,"source_references":sources,"no_match_message":None if reliable else "The available knowledge base does not contain enough evidence to recommend a reliable resolution.",
       "previous_evidence":{"failed":[{"step":x,"count":n} for x,n in failed.most_common(3)],"successful":[{"step":x,"count":n} for x,n in successful.most_common(3)]},
       "sla_risk":"Elevated" if sla else "Normal","sla_reasons":sla,"dependency_impact":dependency_impact(ext["application"]),"demo_mode":os.getenv("DEMO_MODE","true").lower()=="true"}
 
